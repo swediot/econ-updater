@@ -1,0 +1,23 @@
+# Data
+data/
+*.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Secrets
+.env
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+
+# Extracted zip
+doctoral-plan-main/
+doctoral-plan-main.zip

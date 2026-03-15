@@ -1,0 +1,136 @@
+# =============================================================================
+# Econ Updater — Configuration
+# =============================================================================
+
+# Your research profile (used by the LLM to score relevance)
+research_profile: |
+  I am a PhD student in micro labour economics at ETH Zurich / KOF Swiss Economic Institute.
+  My research covers:
+  - Minimum wages and non-wage compensation (Germany, using employer review data)
+  - Wage transparency and wage posting decisions (survey experiments, structural models)
+  - AI/LLMs and unemployment (event study using Swiss admin data)
+  - Firm culture, job quality, and job search behaviour (Swiss admin data)
+  - Firm rent-sharing through wages and non-wage amenities (shift-share IV, energy prices)
+
+  Key themes: compensating differentials, non-wage amenities, directed search,
+  applied microeconometrics (DiD, event studies, IV, LASSO, structural estimation),
+  employer review / crowdsourced data, labour markets in Germany and Switzerland.
+
+# JEL codes for filtering (primary + adjacent)
+jel_codes:
+  primary:
+    - J31  # Wage level, structure, differentials
+    - J32  # Non-wage labour costs and benefits
+    - J33  # Compensation packages, payment methods
+    - J38  # Minimum wage
+    - J63  # Turnover, vacancies, layoffs
+    - J64  # Unemployment
+    - J23  # Labour demand
+    - J24  # Human capital, skills
+    - M51  # Firm employment decisions, promotions
+    - M52  # Compensation, methods of payment
+    - D83  # Search, learning, information
+    - O33  # Technological change
+  adjacent:
+    - J21  # Labour force and employment
+    - J61  # Geographic labour mobility
+    - J71  # Discrimination
+    - J08  # Labour standards (national/international)
+    - C21  # Cross-sectional models
+    - C23  # Panel data models
+    - C26  # Instrumental variables
+    - C36  # Structural models
+
+# Keywords for paper filtering (case-insensitive, matched against title + abstract)
+keywords:
+  strong:  # High signal — likely relevant
+    - minimum wage
+    - non-wage compensation
+    - non-wage amenities
+    - wage posting
+    - wage transparency
+    - pay transparency
+    - salary disclosure
+    - compensating differentials
+    - job quality
+    - firm culture
+    - employer reviews
+    - glassdoor
+    - kununu
+    - rent sharing
+    - rent-sharing
+    - profit sharing
+    - AI employment
+    - AI unemployment
+    - LLM labor
+    - LLM labour
+    - ChatGPT employment
+    - automation unemployment
+    - directed search
+    - job search behavior
+    - job search behaviour
+    - reservation wage
+    - application behavior
+    - application behaviour
+    - employer attractiveness
+    - workplace amenities
+  moderate:  # Relevant context — boost but don't auto-include
+    - labour market
+    - labor market
+    - wage inequality
+    - wage dispersion
+    - monopsony
+    - wage bargaining
+    - job amenities
+    - working conditions
+    - fringe benefits
+    - employee benefits
+    - firm heterogeneity
+    - worker sorting
+    - matched employer-employee
+    - event study
+    - difference-in-differences
+    - shift-share
+    - survey experiment
+    - structural estimation
+    - Switzerland
+    - Germany
+    - DACH
+
+# Paper sources to scrape
+paper_sources:
+  - nber
+  - arxiv_econ
+  - cepr
+  - iza
+  - fed_banks
+
+# Conference sources to scrape
+conference_sources:
+  - inomics
+  - confservice
+  - nber_conf
+  - wikicfp
+  - eea
+
+# Email settings
+email:
+  recipient: "${RECIPIENT_EMAIL}"  # Set via environment variable or GitHub secret
+  sender_name: "Econ Updater"
+  subject_prefix: "[Econ Digest]"
+
+# Schedule
+schedule:
+  day: monday
+  time_cet: "08:30"
+  time_utc: "07:30"  # CET = UTC+1 (winter) / UTC+2 (summer)
+
+# LLM settings (for relevance scoring)
+llm:
+  provider: anthropic  # or openai
+  model: claude-haiku-4-5-20251001  # cheap + fast for scoring
+  min_relevance_score: 0.6  # 0-1, papers below this are excluded
+  max_papers_in_digest: 25  # cap to keep email readable
+
+# How far back to look for new papers (days)
+lookback_days: 8  # slightly more than a week to catch stragglers
