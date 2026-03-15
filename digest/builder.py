@@ -39,8 +39,8 @@ def build_digest(
     scored_papers = scored_papers[:max_papers]
 
     # Group papers by relevance tier
-    must_read = [p for p in scored_papers if (p.relevance_score or 0) >= 0.7]
-    should_read = [p for p in scored_papers if 0.5 <= (p.relevance_score or 0) < 0.7]
+    must_read = [p for p in scored_papers if (p.relevance_score or 0) >= 0.75]
+    should_read = [p for p in scored_papers if 0.5 <= (p.relevance_score or 0) < 0.75]
     might_read = [p for p in scored_papers if (p.relevance_score or 0) < 0.5]
 
     # Filter conferences:
