@@ -137,82 +137,24 @@ class INOMICSScraper(BaseScraper):
 
         return name, location, start_date, deadline
 
-    def _extract_city_country(self, raw_location: str) -> str:
-        """Extract just 'City, Country' from a full address string.
-
-        INOMICS locations follow the pattern:
-            CountryStreetAddressPostalCode City, Country
-        or: CountryCity, Country
-
-        Examples:
-            "PolandWarsaw, Poland" → "Warsaw, Poland"
-            "France147/151 Avenue De Flandre75019 Paris, France" → "Paris, France"
-            "GreeceAnargyrios... Spétses, Greece" → "Spétses, Greece"
-            "26408007 Barcelona, Spain" → "Barcelona, Spain"
-        """
+    def _extract_country(self, raw_location: str) -> str:
+        """Extract just the country name from a raw location string."""
         if not raw_location:
             return ""
 
-        loc = unquote(raw_location).strip()
+        loc = unquote(raw_location).lower().strip()
 
-        # The location always ends with "City , Country" or "City, Country"
-        # Find the LAST occurrence of ", Country" for a known country
-        best_match = None
+        # Find the longest matching country name
+        best = ""
         for country in ALLOWED_COUNTRIES:
-            # Look for ", Country" at the end (with possible trailing whitespace)
-            pattern = rf",\s*({re.escape(country)})\s*$"
-            m = re.search(pattern, loc, re.IGNORECASE)
-            if m:
-                # Prefer the longest country match
-                if best_match is None or len(m.group(1)) > len(best_match.group(1)):
-                    best_match = m
+            if country in loc and len(country) > len(best):
+                best = country
 
-        if best_match:
-            country_name = best_match.group(1).strip()
-            before = loc[:best_match.start()]
+        if best:
+            # Return properly capitalized
+            return best.title() if best not in ("uk", "usa", "us") else best.upper()
 
-            # The city is the last "word group" before the comma
-            # Remove postal codes and other junk, then grab the last city-like segment
-            # Split by common separators: digits, known country names at start
-            # Strategy: walk backwards from the end to find the city name
-            # Remove leading country name (e.g. "France" at start)
-            before = before.strip()
-
-            # Remove postal codes (sequences of digits, possibly with letters like "EH3 7QB")
-            before = re.sub(r"\b[A-Z]{0,2}\d+\s*[A-Z]*\b", " ", before)
-
-            # The city is typically the last segment after the last comma, or the last
-            # capitalized word(s) if no commas remain
-            parts = [p.strip() for p in before.split(",") if p.strip()]
-            if parts:
-                city = parts[-1]
-            else:
-                city = before
-
-            # Clean: remove street-like prefixes, keep just the city name
-            # Remove leading lowercase words (street names like "rue", "avenue")
-            city = re.sub(r"^[a-z].*?\s+(?=[A-Z])", "", city)
-
-            # Remove known country names that appear at the start
-            for c in ALLOWED_COUNTRIES:
-                if city.lower().startswith(c):
-                    remainder = city[len(c):].strip()
-                    if remainder:
-                        city = remainder
-                    break
-
-            city = re.sub(r"\s+", " ", city).strip()
-
-            if city:
-                return f"{city}, {country_name}"
-            return country_name
-
-        # Fallback: return last "City, Country" pattern
-        m = re.search(r"([A-Z][a-zA-Zéèêëàâäùûüôöïîç\s.-]+?)\s*,\s*([A-Z][a-zA-Z\s]+?)\s*$", loc)
-        if m:
-            return f"{m.group(1).strip()}, {m.group(2).strip()}"
-
-        return loc
+        return ""
 
     def _fetch_detail(
         self, name: str, url: str,
@@ -231,7 +173,7 @@ class INOMICSScraper(BaseScraper):
                 source=self.SOURCE_NAME,
                 start_date=listing_start,
                 deadline=listing_deadline,
-                location=self._extract_city_country(listing_location),
+                location=self._extract_country(listing_location),
                 phd_friendly=True,
             )
 
@@ -249,25 +191,13 @@ class INOMICSScraper(BaseScraper):
         # Clean name of trailing junk
         name = re.sub(r"Email\s*Address.*$", "", name).strip()
 
-        # Extract location from detail page
-        raw_location = ""
-        for sel in [".location", ".field-location", "span[class*='location']",
-                    "div[class*='location']", ".venue"]:
-            el = soup.select_one(sel)
-            if el:
-                raw_location = el.get_text(strip=True)
-                break
-        if not raw_location:
-            body_text = soup.get_text()
-            loc_match = re.search(r"(?:Location|Venue|Place)[:\s]+([A-Z][^\n]{3,80})", body_text)
-            if loc_match:
-                raw_location = loc_match.group(1).strip().rstrip(".")
-
-        location = self._extract_city_country(raw_location)
+        # Extract country from detail page text
+        page_text = soup.get_text(" ", strip=True)
+        location = self._extract_country(page_text)
 
         # Fall back to listing location
         if not location and listing_location:
-            location = self._extract_city_country(listing_location)
+            location = self._extract_country(listing_location)
 
         # Extract dates
         start_date = None

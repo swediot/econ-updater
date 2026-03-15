@@ -162,7 +162,6 @@ def _paper_card(paper: Paper, bg_color: str) -> str:
     if len(paper.authors) > 4:
         authors_str += f" + {len(paper.authors) - 4} more"
 
-    date_str = paper.date.strftime("%d %b %Y") if paper.date else ""
     score_str = f"{paper.relevance_score:.0%}" if paper.relevance_score else ""
 
     abstract_preview = paper.abstract[:300] if paper.abstract else ""
@@ -176,7 +175,6 @@ def _paper_card(paper: Paper, bg_color: str) -> str:
       </a>
       <div style="margin:4px 0; color:#7f8c8d; font-size:12px;">
         {authors_str}
-        {f' &middot; {date_str}' if date_str else ''}
         {f' &middot; {paper.source}' if paper.source else ''}
         {f' &middot; Relevance: {score_str}' if score_str else ''}
       </div>
@@ -187,34 +185,57 @@ def _paper_card(paper: Paper, bg_color: str) -> str:
     """
 
 
+_LOWERCASE_WORDS = {"a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for",
+                     "of", "with", "by", "from", "as", "is", "was", "are", "were"}
+
+
 def _clean_conference_name(name: str) -> str:
     """Clean conference name: remove 'Call for Papers' etc., convert to title case."""
-    # Remove common prefixes
+    # Remove common prefixes (case-insensitive)
     name = re.sub(
-        r"^(?:CALL\s+FOR\s+PAPERS\s*[:\-–—.]?\s*|"
-        r"Call\s+for\s+Papers\s*[:\-–—.]?\s*|"
-        r"CALL\s+FOR\s+APPLICATIONS\s*[:\-–—.]?\s*|"
-        r"Call\s+for\s+Applications\s*[:\-–—.]?\s*|"
-        r"CFP\s*[:\-–—.]?\s*)",
+        r"^(?:call\s+for\s+(?:papers|applications|thematic\s+sessions)\s*[:\-–—.]?\s*)",
+        "", name, flags=re.IGNORECASE
+    ).strip()
+
+    # Remove trailing " - Call for ..." suffixes
+    name = re.sub(
+        r"\s*[-–—]\s*call\s+for\s+(?:papers|applications|thematic\s+sessions).*$",
         "", name, flags=re.IGNORECASE
     ).strip()
 
     # Remove form label junk
     name = re.sub(r"(?:Email\s*Address|Full\s*Name).*$", "", name, flags=re.IGNORECASE).strip()
 
-    # Convert ALL CAPS names to title case, but preserve acronyms
-    if name.isupper() or sum(1 for c in name if c.isupper()) > len(name) * 0.6:
-        # Title-case it, but keep short uppercase words (likely acronyms) as-is
-        words = name.split()
-        result = []
-        for w in words:
-            if len(w) <= 4 and w.isupper() and not w.isdigit():
-                result.append(w)  # Keep acronyms like "RSEP", "IWH", "NBP"
+    # Fix title case: handle ALL CAPS and mixed-case issues like "5Th", "ON", "AND"
+    words = name.split()
+    result = []
+    for i, w in enumerate(words):
+        # Keep short all-caps words as acronyms (RSEP, IWH, NBP, CEPR, etc.)
+        if len(w) <= 5 and w.isupper() and w.isalpha():
+            result.append(w)
+        # Fix ordinals like "5Th", "19Th" → "5th", "19th"
+        elif re.match(r"^\d+[A-Z][a-z]+$", w):
+            result.append(w.lower())
+        # Fix ALL CAPS words or mixed-case junk
+        elif w.isupper() and len(w) > 1:
+            lower = w.lower()
+            if i == 0:
+                result.append(w.title())
+            elif lower in _LOWERCASE_WORDS:
+                result.append(lower)
             else:
                 result.append(w.title())
+        # Words with weird casing like "ON" in otherwise normal text
+        elif w.upper() == w and len(w) > 1 and not w[0].isdigit():
+            lower = w.lower()
+            if lower in _LOWERCASE_WORDS and i > 0:
+                result.append(lower)
+            else:
+                result.append(w.title())
+        else:
+            result.append(w)
 
-        name = " ".join(result)
-
+    name = " ".join(result)
     return name
 
 
@@ -228,6 +249,8 @@ def _conference_card(conf: Conference) -> str:
     elif conf.start_date:
         date_str = conf.start_date.strftime("%d %b %Y")
 
+    score_str = f"{conf.relevance_score:.0%}" if conf.relevance_score else ""
+
     # Build metadata fields
     fields = []
     if conf.location:
@@ -238,14 +261,10 @@ def _conference_card(conf: Conference) -> str:
         fields.append(f"<strong>Deadline:</strong> {deadline_str}")
     else:
         fields.append("<strong>Deadline:</strong> TBA")
-    if conf.source:
-        fields.append(f"<strong>Source:</strong> {conf.source}")
+    if score_str:
+        fields.append(f"<strong>Relevance:</strong> {score_str}")
 
     fields_html = " &middot; ".join(fields)
-
-    # Clean description of form labels
-    description = conf.description or ""
-    description = re.sub(r"(?:Email\s*Address|Full\s*Name).*$", "", description, flags=re.IGNORECASE).strip()
 
     return f"""
     <div style="margin:8px 0; padding:12px 16px; background-color:#eafaf1; border-radius:6px; border-left:3px solid #27ae60;">
@@ -255,6 +274,5 @@ def _conference_card(conf: Conference) -> str:
       <div style="margin:4px 0; color:#7f8c8d; font-size:12px;">
         {fields_html}
       </div>
-      {f'<p style="margin:6px 0 0; color:#555; font-size:12px;">{description[:200]}</p>' if description else ''}
     </div>
     """

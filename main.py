@@ -17,7 +17,7 @@ import yaml
 
 from digest.builder import build_digest
 from email_sender import send_digest
-from scorer import score_papers_with_llm
+from scorer import score_conferences_with_llm, score_papers_with_llm
 from scrapers.base import Paper, Conference
 
 # Paper scrapers
@@ -175,10 +175,17 @@ def run(
     logger.info("STEP 2: Scoring paper relevance...")
     scored_papers = score_papers_with_llm(new_papers, config)
 
+    logger.info("STEP 2b: Scoring conference relevance...")
+    scored_confs = score_conferences_with_llm(new_confs, config)
+    # Filter out low-relevance conferences
+    min_conf_score = config.get("llm", {}).get("min_conference_score", 0.4)
+    scored_confs = [c for c in scored_confs if (c.relevance_score or 0) >= min_conf_score]
+    scored_confs.sort(key=lambda c: c.relevance_score or 0, reverse=True)
+
     # 4. Build digest
     logger.info("=" * 60)
     logger.info("STEP 3: Building digest...")
-    subject, html_body = build_digest(scored_papers, new_confs, config)
+    subject, html_body = build_digest(scored_papers, scored_confs, config)
 
     # 5. Save HTML preview
     if save_html or dry_run:

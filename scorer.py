@@ -12,7 +12,7 @@ import os
 import re
 from typing import Optional
 
-from scrapers.base import Paper
+from scrapers.base import Conference, Paper
 
 logger = logging.getLogger(__name__)
 
@@ -149,3 +149,95 @@ Be generous with labour economics papers. JSON only, no other text."""
                     papers[idx].relevance_score = float(score)
     except Exception as e:
         logger.warning(f"Failed to parse LLM scores: {e}")
+
+
+def score_conferences_with_llm(
+    conferences: list[Conference],
+    config: dict,
+) -> list[Conference]:
+    """Score conferences for relevance using the LLM."""
+    if not conferences:
+        return conferences
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        logger.warning("No ANTHROPIC_API_KEY — skipping conference scoring")
+        for c in conferences:
+            c.relevance_score = 0.5  # default baseline
+        return conferences
+
+    research_profile = config.get("research_profile", "")
+    model = config.get("llm", {}).get("model", "claude-haiku-4-5-20251001")
+
+    # Score all conferences in one batch (usually <30)
+    try:
+        _score_conference_batch(conferences, research_profile, model, api_key)
+    except Exception as e:
+        logger.warning(f"Conference LLM scoring failed: {e}")
+        for c in conferences:
+            if c.relevance_score is None:
+                c.relevance_score = 0.5
+
+    return conferences
+
+
+def _score_conference_batch(
+    conferences: list[Conference],
+    research_profile: str,
+    model: str,
+    api_key: str,
+) -> None:
+    """Score conferences via the Anthropic API."""
+    import anthropic
+
+    client = anthropic.Anthropic(api_key=api_key)
+
+    confs_text = ""
+    for idx, conf in enumerate(conferences):
+        confs_text += (
+            f"\n[{idx}] {conf.name}\n"
+            f"    Location: {conf.location or 'unknown'}\n"
+        )
+
+    prompt = f"""You are an academic conference relevance scorer. Given a researcher's profile
+and a list of conferences, score each conference's relevance from 0.0 to 1.0.
+
+RESEARCHER PROFILE:
+{research_profile}
+
+CONFERENCES:
+{confs_text}
+
+Score based on how relevant the conference topic is to the researcher's field.
+Consider: labour economics, applied micro, wage/compensation, AI & labour, job search,
+firm behaviour, and econometrics conferences are highly relevant.
+General economics conferences in Europe are moderately relevant.
+Finance-only, macro-only, or development-only conferences are less relevant.
+
+Return ONLY a JSON array of objects with "index" (int) and "score" (float 0.0-1.0).
+Score meaning:
+- 0.8-1.0: Directly relevant — labour/applied micro conference
+- 0.6-0.7: Related field — general economics, econometrics
+- 0.3-0.5: Tangentially related — finance, macro, development
+- 0.0-0.2: Not relevant — unrelated field
+
+JSON only, no other text."""
+
+    try:
+        response = client.messages.create(
+            model=model,
+            max_tokens=1024,
+            messages=[{"role": "user", "content": prompt}],
+        )
+
+        response_text = response.content[0].text.strip()
+        json_match = re.search(r'\[.*\]', response_text, re.DOTALL)
+        if json_match:
+            scores = json.loads(json_match.group())
+            for item in scores:
+                idx = item.get("index", -1)
+                score = item.get("score", 0.0)
+                if 0 <= idx < len(conferences):
+                    conferences[idx].relevance_score = float(score)
+    except Exception as e:
+        logger.warning(f"Failed to parse conference LLM scores: {e}")

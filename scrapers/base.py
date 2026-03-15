@@ -40,6 +40,7 @@ class Conference:
     location: str = ""
     description: str = ""
     phd_friendly: bool = True
+    relevance_score: Optional[float] = None
 
     @property
     def id(self) -> str:

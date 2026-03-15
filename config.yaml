@@ -130,6 +130,7 @@ llm:
   provider: anthropic  # or openai
   model: claude-haiku-4-5-20251001  # cheap + fast for scoring
   min_relevance_score: 0.6  # 0-1, papers below this are excluded
+  min_conference_score: 0.4  # 0-1, conferences below this are excluded
   max_papers_in_digest: 25  # cap to keep email readable
 
 # How far back to look for new papers (days)
