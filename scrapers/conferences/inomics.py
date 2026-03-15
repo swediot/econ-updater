@@ -18,12 +18,26 @@ from scrapers.base import BaseScraper, Conference
 
 logger = logging.getLogger(__name__)
 
+# Only keep conferences in these regions
+ALLOWED_COUNTRIES = {
+    # Europe
+    "albania", "andorra", "austria", "belgium", "bosnia", "bulgaria", "croatia",
+    "cyprus", "czech republic", "czechia", "denmark", "estonia", "finland",
+    "france", "germany", "greece", "hungary", "iceland", "ireland", "italy",
+    "kosovo", "latvia", "liechtenstein", "lithuania", "luxembourg", "malta",
+    "moldova", "monaco", "montenegro", "netherlands", "north macedonia",
+    "norway", "poland", "portugal", "romania", "san marino", "serbia",
+    "slovakia", "slovenia", "spain", "sweden", "switzerland", "turkey",
+    "ukraine", "united kingdom", "uk", "england", "scotland", "wales",
+    # North America
+    "united states", "usa", "us", "canada", "mexico",
+}
+
 
 class INOMICSScraper(BaseScraper):
     SOURCE_NAME = "INOMICS"
     BASE_URL = "https://inomics.com"
 
-    # Pages that list conferences
     LISTING_URLS = [
         "https://inomics.com/top/conferences",
         "https://inomics.com/search?conference=conference&discipline=economics",
@@ -59,7 +73,6 @@ class INOMICSScraper(BaseScraper):
         conferences = []
         soup = BeautifulSoup(html, "html.parser")
 
-        # Collect unique conference detail URLs
         seen_hrefs: set[str] = set()
         for a in soup.find_all("a", href=True):
             href = a.get("href", "")
@@ -70,36 +83,33 @@ class INOMICSScraper(BaseScraper):
                 continue
             seen_hrefs.add(link)
 
-            # Try to get a clean name from the link text
             raw_text = a.get_text(strip=True)
             if len(raw_text) < 10:
                 continue
 
-            # Parse the concatenated text to extract name, location, dates
             name, listing_location, listing_start, listing_deadline = self._parse_listing_text(raw_text)
 
-            # Fetch detail page for structured metadata
             conf = self._fetch_detail(name, link, listing_location, listing_start, listing_deadline)
             if conf:
+                # Filter: only Europe and North America
+                if conf.location and not self._is_allowed_location(conf.location):
+                    logger.debug(f"[INOMICS] Skipping non-Europe/NA conf: {conf.name} ({conf.location})")
+                    continue
                 conferences.append(conf)
 
         return conferences
 
+    def _is_allowed_location(self, location: str) -> bool:
+        loc_lower = location.lower()
+        return any(country in loc_lower for country in ALLOWED_COUNTRIES)
+
     def _parse_listing_text(self, raw: str) -> tuple[str, str, datetime | None, datetime | None]:
-        """Parse INOMICS concatenated listing text into name, location, dates.
-
-        Raw text looks like:
-        "47th RSEP International Multidisciplinary ConferenceBetween15 Mayand16 May
-         inBarcelona,SpainMay 16, 20268080Review of Socio-Economic Perspectives (RSEP)"
-
-        Returns: (name, location, start_date, deadline)
-        """
-        # Remove "ConferencePosted X days ago" prefix
+        """Parse INOMICS concatenated listing text into name, location, dates."""
         text = re.sub(r"^ConferencePosted\s+\d+\s+\w+\s+ago\s*", "", raw).strip()
 
         # Extract location from "in City, Country" pattern
         location = ""
-        loc_match = re.search(r"\bin\s*([A-Z][a-zA-Z\s,]+(?:Spain|Germany|France|Italy|UK|United Kingdom|Netherlands|Belgium|Switzerland|Austria|Sweden|Norway|Denmark|Portugal|Greece|Poland|Czech Republic|Ireland|Finland|Hungary|Romania|Croatia|Turkey|Cyprus|Luxembourg|Estonia|Latvia|Lithuania|Slovenia|Slovakia|Malta|Bulgaria|Iceland))", text)
+        loc_match = re.search(r"\bin\s*([A-Z][a-zA-Z\s,.-]+,\s*[A-Z][a-zA-Za-z\s]+?)(?:\d|$)", text)
         if loc_match:
             location = loc_match.group(1).strip().rstrip(",")
 
@@ -110,13 +120,12 @@ class INOMICSScraper(BaseScraper):
             start_str = f"{date_match.group(1)} {date_match.group(3)}"
             start_date = self._parse_date(start_str)
 
-        # Extract deadline from date patterns after the location
         deadline = None
         deadline_match = re.search(r"(\w+\s+\d{1,2},?\s+\d{4})", text)
         if deadline_match:
             deadline = self._parse_date(deadline_match.group(1))
 
-        # Extract clean name — cut at "Between" or first date pattern
+        # Extract clean name
         name = re.split(r"Between\s*\d", text, maxsplit=1)[0].strip()
         if name == text:
             name = re.split(r"\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)", text, maxsplit=1)[0].strip()
@@ -127,6 +136,49 @@ class INOMICSScraper(BaseScraper):
             name = raw
 
         return name, location, start_date, deadline
+
+    def _extract_city_country(self, raw_location: str) -> str:
+        """Extract just 'City, Country' from a full address string.
+
+        Input like: "Via Columbia 2, Rome, ItalyVia Columbia 200133 Rome , Italy"
+        Output: "Rome, Italy"
+        """
+        if not raw_location:
+            return ""
+
+        # First, URL-decode
+        loc = unquote(raw_location)
+
+        # Remove postal codes (4-6 digit sequences)
+        loc = re.sub(r"\b\d{4,6}\b", " ", loc)
+
+        # Split on known country names to find the last occurrence
+        # This handles the duplicated text pattern
+        for country in sorted(ALLOWED_COUNTRIES, key=len, reverse=True):
+            # Case-insensitive search for country at end of a segment
+            pattern = rf",\s*({re.escape(country)})\s*$"
+            m = re.search(pattern, loc, re.IGNORECASE)
+            if m:
+                country_name = m.group(1).strip()
+                # Get the text before this country match
+                before = loc[:m.start()].strip().rstrip(",")
+                # Extract the last comma-separated segment as the city
+                parts = [p.strip() for p in before.split(",") if p.strip()]
+                if parts:
+                    city = parts[-1]
+                    # Clean up extra spaces
+                    city = re.sub(r"\s+", " ", city).strip()
+                    return f"{city}, {country_name}"
+                return country_name
+
+        # Fallback: try to find "City , Country" pattern with extra spaces
+        m = re.search(r"([A-Z][a-zA-Z\s.-]+?)\s*,\s*([A-Z][a-zA-Z\s]+?)\s*$", loc)
+        if m:
+            city = m.group(1).strip()
+            country = m.group(2).strip()
+            return f"{city}, {country}"
+
+        return raw_location
 
     def _fetch_detail(
         self, name: str, url: str,
@@ -145,57 +197,45 @@ class INOMICSScraper(BaseScraper):
                 source=self.SOURCE_NAME,
                 start_date=listing_start,
                 deadline=listing_deadline,
-                location=listing_location,
+                location=self._extract_city_country(listing_location),
                 phd_friendly=True,
             )
 
         soup = BeautifulSoup(resp.text, "html.parser")
 
-        # Try to get a better title from the detail page <h1>
+        # Try to get a better title from <h1>
         title_el = soup.select_one("h1")
         if title_el:
             detail_name = title_el.get_text(strip=True)
+            # Remove "Email Address" or other form labels that get concatenated
+            detail_name = re.sub(r"Email\s*Address.*$", "", detail_name).strip()
             if 10 <= len(detail_name) <= 200:
                 name = detail_name
 
+        # Clean name of trailing junk
+        name = re.sub(r"Email\s*Address.*$", "", name).strip()
+
         # Extract location from detail page
-        location = ""
+        raw_location = ""
         for sel in [".location", ".field-location", "span[class*='location']",
                     "div[class*='location']", ".venue"]:
             el = soup.select_one(sel)
             if el:
-                location = el.get_text(strip=True)
+                raw_location = el.get_text(strip=True)
                 break
-        if not location:
+        if not raw_location:
             body_text = soup.get_text()
-            loc_match = re.search(r"(?:Location|Venue|Place)[:\s]+([A-Z][^\n]{3,50})", body_text)
+            loc_match = re.search(r"(?:Location|Venue|Place)[:\s]+([A-Z][^\n]{3,80})", body_text)
             if loc_match:
-                location = loc_match.group(1).strip().rstrip(".")
+                raw_location = loc_match.group(1).strip().rstrip(".")
 
-        # Clean URL-encoded artifacts from location (e.g. "Sevilla%2C%20SpainSevilla , Spain")
-        if location:
-            decoded = unquote(location)
-            # If URL-decoded version differs, the text has encoded parts — remove them
-            if decoded != location:
-                location = decoded
-            # Remove duplicated text (encoded + decoded appearing together)
-            # Pattern: "City%2C%20CountryCity , Country" → "City, Country"
-            if "%" in location:
-                location = unquote(location)
-            # Check for doubled location text
-            half = len(location) // 2
-            if half > 5:
-                first_half = location[:half].strip().rstrip(",").strip()
-                second_half = location[half:].strip().lstrip(",").strip()
-                # If the two halves are similar, keep just the second (cleaner) one
-                if first_half.replace(" ", "").lower()[:10] == second_half.replace(" ", "").lower()[:10]:
-                    location = second_half
+        location = self._extract_city_country(raw_location)
 
-        # Fall back to listing location if detail page didn't have one
+        # Fall back to listing location
         if not location and listing_location:
-            location = listing_location
+            location = self._extract_city_country(listing_location)
 
-        # Extract dates from detail page
+        # Extract dates
         start_date = None
         deadline = None
         body_text = soup.get_text(" ", strip=True)
@@ -224,20 +264,26 @@ class INOMICSScraper(BaseScraper):
                 if deadline:
                     break
 
-        # Fall back to listing-extracted dates
         if not start_date and listing_start:
             start_date = listing_start
         if not deadline and listing_deadline:
             deadline = listing_deadline
 
-        # Description
+        # Description — skip form labels like "Email Address"
         description = ""
         for sel in [".description", ".field-body", ".abstract", ".summary",
-                    "div[class*='description']", "article p"]:
+                    "div[class*='description']"]:
             el = soup.select_one(sel)
             if el:
-                description = el.get_text(strip=True)[:300]
+                desc_text = el.get_text(strip=True)[:300]
+                # Skip if it's just a form label
+                if desc_text.lower().strip() not in ("email address", "email", ""):
+                    description = desc_text
                 break
+
+        # Clean description of form artifacts
+        if description:
+            description = re.sub(r"Email\s*Address.*$", "", description).strip()
 
         return Conference(
             name=name,
